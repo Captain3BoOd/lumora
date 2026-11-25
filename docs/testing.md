@@ -75,3 +75,42 @@ Tracked metrics: CPU and GPU frame time are tracked **separately** - they overla
 - Microphone capture pause and resume on the emulator lanes and in the phone script; if a level refuses resume, the Stopped state is entered cleanly (Section 9.3 item 5).
 - Flash-rate lint test with known flashing and non-flashing scenes (Section 9.5).
 - Documentation consistency check runs in required CI (`tools/check_docs.py`).
+
+### 16.6 Running the Null, Vulkan and GLES test subsets
+
+All RHI tests are Catch2 test cases in one executable, `lumora_tests`. `python3 tools/ci/test.py` (the entry point CI uses) runs the docs check, configures, builds, and runs `ctest`, which runs that one executable. Add `--sanitize` for ASan and UBSan, and `--build-dir DIR` or `--config Debug` to change the build. To run only part of the suite, build once and then call the executable directly with a Catch2 test-name filter. On a single-config generator (Linux, with `--build-dir build`) the executable is `build/tests/lumora_tests`; on Windows with Visual Studio it is under `build/tests/Release/`.
+
+| Subset | Test names | Filter | Needs |
+|---|---|---|---|
+| Null backend | names starting with `null ` | `build/tests/lumora_tests "null *"` | Nothing. No GPU, no driver. Always built. |
+| Vulkan | names starting with `vulkan` | `build/tests/lumora_tests "vulkan*"` | The Vulkan headers and loader at configure time, plus a Vulkan driver at run time (see below). |
+| GLES | names starting with `gles` | `build/tests/lumora_tests "gles*"` | EGL and GLESv2 with the GLES 3.2 headers at configure time (Linux), plus a software GLES 3.2 context at run time. |
+
+Use `build/tests/lumora_tests --list-tests` to see which test cases exist in your build. A subset whose backend was not found at configure time is not compiled, so its filter matches nothing and Catch2 prints "No tests ran". CMake prints one line per backend at configure time: `Lumora: Vulkan backend enabled` or `Lumora: Vulkan not found, backend disabled`, and the same for GLES. Check those lines before reading "No tests ran" as a pass.
+
+#### Null backend
+
+The Null device validates descriptions and tracks resource lifetime, with no GPU work. Its tests need no driver, so they run wherever the suite builds, including the Linux and Windows CI jobs.
+
+#### Vulkan (software driver)
+
+CI installs `libvulkan-dev`, `mesa-vulkan-drivers`, `vulkan-validationlayers` and `glslang-tools` on Ubuntu 24.04. The Vulkan tests then run on Mesa lavapipe, a software Vulkan driver, so no GPU is needed.
+
+- The device test expects the Khronos validation layer to be active. If you have no validation layer, set `LUMORA_ALLOW_NO_VALIDATION=1` to skip that one check.
+- The triangle render test is compiled only when its shaders are available: `glslangValidator` found at configure time, or `-DLUMORA_PRECOMPILED_SPV_DIR=<dir>` pointing at `triangle_vert_spv.h` and `triangle_frag_spv.h`.
+- The render test compares the image with the baseline under `tests/golden/lavapipe/`. See `docs/golden-images.md` for tolerance and blessing. Do not overwrite a baseline to make a diff pass.
+- On Windows, the `windows-vulkan-spike` CI job runs the same Vulkan tests on lavapipe from a pinned Mesa build. It is a spike, marked `continue-on-error`, and does not gate the result.
+
+#### GLES (software context)
+
+CI runs the GLES triangle test on Mesa llvmpipe through a headless EGL context, in the same Linux job. Its baseline is `tests/golden/llvmpipe-gles/`.
+
+#### What the results mean
+
+Results from lavapipe, llvmpipe and WARP are software evidence. They show that the RHI code runs and renders correctly on a software renderer. They are not evidence about any real GPU, phone driver or device. Label them as CI-verified software evidence, as in `CONTRIBUTING.md`, and never as owner-hardware-verified.
+
+#### Environment variables used by the tests and CI
+
+- `LUMORA_ALLOW_NO_VALIDATION=1`: skip the check that the Vulkan validation layer is active.
+- `LUMORA_BLESS_GOLDEN=1`: write the actual image as the new baseline. Review the image by eye before committing it.
+- `SDL_VIDEODRIVER=dummy` and `ASAN_OPTIONS=detect_leaks=0`: set by the Linux CI job. The second one is there because the software Vulkan driver leaves small allocations.
