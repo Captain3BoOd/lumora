@@ -1,4 +1,5 @@
 #include "scene.h"
+#include "../package/json_limits.h"
 
 #include <set>
 
@@ -78,6 +79,16 @@ Node parse_node(const JsonValue& j, unsigned depth, unsigned max_depth, std::set
 SceneResult parse_scene(std::string_view text, unsigned max_node_depth) {
   SceneResult r;
   try {
+    {
+      // Two JSON levels per node (object plus children array); keep the pre-scan above the node depth check so
+      // the TooDeep error keeps its meaning.
+      lumora::package::JsonLimits limits;
+      limits.max_depth = 2 * max_node_depth + 8;
+      const auto scan = lumora::package::scan_json(text, limits);
+      if (scan.verdict != lumora::package::JsonVerdict::Ok)
+        throw Fail{SceneError::NotJson,
+                   std::string("rejected by the JSON limits: ") + lumora::package::to_string(scan.verdict)};
+    }
     auto p = parse_json(text);
     if (!p.ok) throw Fail{SceneError::NotJson, p.error};
     if (!p.value.is_object()) throw Fail{SceneError::WrongType, "scene must be an object"};

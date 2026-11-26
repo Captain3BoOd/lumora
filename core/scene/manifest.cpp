@@ -1,4 +1,5 @@
 #include "manifest.h"
+#include "../package/json_limits.h"
 
 #include <cmath>
 #include <limits>
@@ -77,6 +78,12 @@ ManifestError read_version(const JsonValue& root, const char* key, std::uint32_t
 }  // namespace
 
 ManifestResult parse_manifest(std::string_view json_text, const EngineSupport& support) {
+  {
+    const auto scan = lumora::package::scan_json(json_text);
+    if (scan.verdict != lumora::package::JsonVerdict::Ok)
+      return fail(ManifestError::NotJson,
+                  std::string("manifest.json rejected by the JSON limits: ") + lumora::package::to_string(scan.verdict));
+  }
   JsonParseResult parsed = parse_json(json_text);
   if (!parsed.ok) return fail(ManifestError::NotJson, "manifest.json is not valid JSON: " + parsed.error);
   const JsonValue& root = parsed.value;

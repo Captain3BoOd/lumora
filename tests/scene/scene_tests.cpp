@@ -157,3 +157,10 @@ TEST_CASE("manifest backends are checked and queried") {
   Manifest full;
   CHECK(manifest_supports_backend(full, "d3d12"));  // no list means a full package
 }
+
+TEST_CASE("manifest parser applies the JSON limits before parsing", "[scene][limits]") {
+  const std::string huge(70000, 'x');
+  const auto r = parse_manifest("{\"author\":\"" + huge + "\"}");
+  CHECK(r.error == ManifestError::NotJson);
+  CHECK(r.message.find("JSON limits") != std::string::npos);
+}

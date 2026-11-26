@@ -1,6 +1,7 @@
 // settings.json parser and validator. Rules are in settings.h; choices the header leaves open are in
 // docs/settings.md.
 #include "settings.h"
+#include "../package/json_limits.h"
 
 #include <algorithm>
 #include <cmath>
@@ -313,6 +314,12 @@ SettingsParseResult parse_migrations(const JsonValue& arr_v, SettingsSchema& sch
 }  // namespace
 
 SettingsParseResult parse_settings_schema(const std::string& json_text) {
+  {
+    const auto scan = lumora::package::scan_json(json_text);
+    if (scan.verdict != lumora::package::JsonVerdict::Ok)
+      return fail(SettingsError::NotJson,
+                  std::string("rejected by the JSON limits: ") + lumora::package::to_string(scan.verdict));
+  }
   JsonParseResult parsed = parse_json(json_text);
   if (!parsed.ok) return fail(SettingsError::NotJson, "not valid JSON: " + parsed.error);
   const JsonValue& root = parsed.value;

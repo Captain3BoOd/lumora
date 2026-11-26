@@ -106,3 +106,11 @@ TEST_CASE("an optional script entry is read and checked", "[loader]") {
   CHECK(load_package(build_with_script(R"(,"script":"../x.lua")", &lua)).error == LoadError::BadManifest);
   CHECK(load_package(build_with_script(R"(,"script":5)", &lua)).error == LoadError::BadManifest);
 }
+
+TEST_CASE("scene loader applies the JSON limits before parsing", "[scene][limits]") {
+  const std::string huge(70000, 'x');
+  const auto r = parse_scene("{\"root\":{\"id\":\"a\",\"name\":\"" + huge + "\"}}");
+  CHECK(r.error == SceneError::NotJson);
+  CHECK(r.message.find("JSON limits") != std::string::npos);
+  CHECK(parse_scene(R"({"root":{"id":"a","name":"ok"}})").ok());
+}
