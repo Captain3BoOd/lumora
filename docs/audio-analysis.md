@@ -51,9 +51,14 @@ Steps:
 4. Butterfly: `t.re = (b.re*wr - b.im*wi + 16384) >> 15`, `t.im = (b.re*wi + b.im*wr + 16384) >> 15`, `a' = (a + t) >> 1`, `b' = (a - t) >> 1`. Every stage halves, so the output is scaled by 1/n.
 5. `out_power[k] = re*re + im*im` in 64 bits, cast to `uint32`.
 
-Power bound: after the 1/n scaling every component stays within about 2^15, so the squared sum stays below 2^32 (about 2^31 at the very most). The tests cover full-scale and -32768 blocks.
+Magnitude bounds (derived, then checked):
 
-Only entries 0..511 and 768..1023 are read (`wr` uses `t < 512`, `wi` uses `(t+768) mod 1024`), so entries 512..767 are never read by the transform. They are kept so the table is the plain 1024-entry cosine.
+- Every butterfly output is a mean of windowed samples times unit-modulus twiddles, plus rounding. A sub-FFT of m >= 2 points taken at stride n/m covers whole periods of the Hann window, so the mean of its weights is 1/2 (for m = 2, `h[i] + h[i+n/2] = 1`). With `|s| <= 32768` every complex value at every stage therefore has modulus at most about 16384 plus a rounding drift under 8 (window floor, at most 1; each twiddle rounding at most 0.71, halved at each later stage).
+- So components stay within about 2^14, power `re*re + im*im` stays below about 2^28 (under 2^29 with the drift), and the twiddle sums `b.re*wr - b.im*wi` stay below about 16392 * 32769, about 2^29, under 2^30. The largest `|wr, wi|` modulus in the table is 32768.56.
+- Without the averaging argument, the cruder induction `R' = (R + R*|w|/32768 + 0.71)/2 + 0.5` from `R = 32767` gives a modulus under 32779 at every stage, so twiddle sums and power stay under 1.075e9, below 2^31. This is what the `int32` and 2,000,000,000 mutants rely on.
+- Largest value seen over full-scale DC, impulses and a sweep of full-scale sine and square tones at 64, 256 and 1024 points: power 268402689 (a component of 16383), just under 2^28.
+
+The tests cover full-scale, -32768 and tone blocks. `uint32` holds the power with a factor of at least 4 to spare.
 
 ## Band energies
 
@@ -64,6 +69,10 @@ Only entries 0..511 and 768..1023 are read (`wr` uses `t < 512`, `wi` uses `(t+7
 - Bins outside `[edges[0], edges[band_count])` are ignored. An empty band gives 0. Sums are exact in 64 bits.
 - `out_energy` is required when `band_count > 0`. `power` is required only if some band is non-empty.
 - On any violation, or a null pointer where data is needed, it returns false and writes nothing.
+
+## Table test hook
+
+The two tables have external linkage in `lumora::audio` but are not declared in `analysis.h`. The test file declares them `extern` and compares all 1024 entries of each against values computed with `std::cos` (round half away from zero, clamped as above). The test also checks that no value sits within 1e-6 of a rounding tie, so double rounding cannot differ from exact arithmetic. This is the only reason for the linkage: do not use the tables from other code.
 
 ## Regenerating and checking
 
@@ -84,21 +93,20 @@ The reference builds both tables with `math.cos` and checks them at import again
 
 - silence, full scale, -32768 samples, tones, impulses, DC, and seeded random blocks (xorshift64*), for every size from 64 to 1024: 27 fixtures per size, 135 golden digests of the full power output;
 - invalid sizes and null pointers, and that nothing is written on failure;
+- all 1024 entries of each table against `std::cos`, and a zero-band call with `edges[0]` above `bins`;
 - an in-test naive oracle (an independent transform with its own arithmetic, sharing no code with the implementation) compared on every size;
 - digests over 8100 envelope cases and 6000 band cases, and an `isqrt64` boundary sweep around perfect squares and at the 64-bit limits.
 
 ## Mutation check
 
-82 hand-written source mutants of `analysis.cpp` (table entries, missing rounding term, dropped halving, shifts, sign of `wi`, stride, bit reversal, window, power width, `isqrt`, envelope clamp and flooring, band validation and null rules) were each compiled against the unchanged tests. 75 were killed, 7 survived. Seven of the kills were crashes only (null-pointer or size guards removed): they die on a null dereference or out-of-bounds access rather than on a failed assertion.
+82 hand-written source mutants of `analysis.cpp` (table entries, missing rounding term, dropped halving, shifts, sign of `wi`, stride, bit reversal, window, power width, `isqrt`, envelope clamp and flooring, band validation and null rules) were each compiled against the unchanged tests. 77 were killed, 5 survived. Seven of the kills are crashes only (null-pointer or size guards removed): they die on a null dereference or out-of-bounds access rather than on a failed assertion. The single-entry table mutants (`c[256]`, `c[700]`, the last cosine entry, Hann entries) are killed by the full table comparison.
 
 Survivors, each argued:
 
-- `c[256]` plus 1: the entry is 0, and it is read only as `wr` at `t = 256` in the last stage. The change adds `b.re >> 15`, which is nonzero only when `|b.re| >= 16384`. The Hann window averages 1/2, so `|b.re|` stays at or under about 16383. No input found in 2248 targeted tries (every bin as a tone at four phases, plus random full-scale blocks).
-- `c[700]` minus 1: entries 512..767 are never read (see FFT section). Equivalent.
-- Envelope: `x == env` early return removed. `delta` is 0, so the step is 0. Equivalent.
-- Twiddle products in 32 bits: the largest product sum is below 32768*sqrt(2)*32767, about 1.5e9, under 2^31. Equivalent for every reachable input.
-- Power computed in `int32`: the sum is at most about 2^31 only at an impossible extreme. Equivalent for every reachable input.
-- Power saturated at 2,000,000,000: same bound. Equivalent for every reachable input.
-- `edges[0] > bins` check removed: implied by non-decreasing edges and `edges[band_count] <= bins`. Equivalent.
+- Envelope `x == env` early return removed: `delta` is 0, so the step is 0. Equivalent.
+- Twiddle products in 32 bits: the sums stay below about 2^30 (and below 2^31 even by the crude bound), see the magnitude bounds. Equivalent for every reachable input.
+- Power computed in `int32`: power stays below about 2^28 (below 2^31 by the crude bound). Equivalent.
+- Power saturated at 2,000,000,000: never reached, same bound. Equivalent.
+- `edges[0] > bins` check removed: implied by non-decreasing edges and `edges[band_count] <= bins` (for zero bands, `edges[0]` is `edges[band_count]`). Equivalent. A test still pins the zero-band `edges[0] > bins` result.
 
 Not run: Windows, Android, Vulkan/GLES, the editor, `tools/ci/test.py`, fuzzing, a full local build. Windows is covered by CI only.

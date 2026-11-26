@@ -14,6 +14,12 @@
 
 #include "analysis.h"
 
+// Test hook: the tables have external linkage in analysis.cpp but are not declared in the header.
+namespace lumora::audio {
+extern const std::int16_t kCos[1024];
+extern const std::uint16_t kHann[1024];
+}  // namespace lumora::audio
+
 using namespace lumora::audio;
 
 namespace {
@@ -21,7 +27,7 @@ namespace {
 constexpr std::uint64_t kM64 = std::numeric_limits<std::uint64_t>::max();
 
 // BEGIN GENERATED REFERENCE (tools/audio_analysis_ref.py)
-const std::int16_t kRefCos[1024] = {
+extern const std::int16_t kRefCos[1024] = {
     32767, 32767, 32766, 32762, 32758, 32753, 32746, 32738, 32729, 32718, 32706, 32693,
     32679, 32664, 32647, 32629, 32610, 32590, 32568, 32546, 32522, 32496, 32470, 32442,
     32413, 32383, 32352, 32319, 32286, 32251, 32214, 32177, 32138, 32099, 32058, 32015,
@@ -109,7 +115,7 @@ const std::int16_t kRefCos[1024] = {
     32610, 32629, 32647, 32664, 32679, 32693, 32706, 32718, 32729, 32738, 32746, 32753,
     32758, 32762, 32766, 32767,
 };
-const std::uint16_t kRefHann[1024] = {
+extern const std::uint16_t kRefHann[1024] = {
     0, 0, 1, 3, 5, 8, 11, 15, 20, 25, 31, 37,
     44, 52, 60, 69, 79, 89, 100, 111, 123, 136, 149, 163,
     177, 192, 208, 224, 241, 259, 277, 296, 315, 335, 355, 376,
@@ -844,4 +850,30 @@ TEST_CASE("band_energies", "[audio_analysis]") {
     REQUIRE(cases == kRefBandCount);
     REQUIRE(h.h == kRefBandDigest);
   }
+}
+
+TEST_CASE("embedded tables match std::cos for all 1024 entries", "[tables]") {
+  const double pi = std::acos(-1.0);
+  for (int j = 0; j < 1024; ++j) {
+    const double a = 2.0 * pi * j / 1024.0;
+    const double c = std::floor(32768.0 * std::cos(a) + 0.5);
+    const double h = std::floor(32768.0 * (0.5 - 0.5 * std::cos(a)) + 0.5);
+    // Not near a rounding tie, so double rounding gives the same integer as exact arithmetic.
+    REQUIRE(std::fabs(std::fabs(32768.0 * std::cos(a) - std::floor(32768.0 * std::cos(a))) - 0.5) > 1e-6);
+    const long cc = c > 32767.0 ? 32767 : (c < -32767.0 ? -32767 : static_cast<long>(c));
+    const long hh = h > 32767.0 ? 32767 : static_cast<long>(h);
+    REQUIRE(static_cast<long>(kCos[j]) == cc);
+    REQUIRE(static_cast<long>(kHann[j]) == hh);
+  }
+}
+
+TEST_CASE("zero bands with edges[0] above bins fail", "[band]") {
+  const std::uint32_t power[4] = {1, 2, 3, 4};
+  const std::uint32_t over[1] = {5};
+  const std::uint32_t at[1] = {4};
+  std::uint64_t out[1] = {0xAAAAAAAAull};
+  REQUIRE_FALSE(band_energies(power, 4, over, 0, out));
+  REQUIRE_FALSE(band_energies(nullptr, 0, over, 0, nullptr));
+  REQUIRE(out[0] == 0xAAAAAAAAull);
+  REQUIRE(band_energies(power, 4, at, 0, nullptr));
 }

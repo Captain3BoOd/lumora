@@ -249,7 +249,7 @@ def digests():
 
 
 def arr(name, typ, vals, per=10):
-    lines = ["const %s %s[%d] = {" % (typ, name, len(vals))]
+    lines = ["extern const %s %s[%d] = {" % (typ, name, len(vals))]
     for i in range(0, len(vals), per):
         lines.append("    " + ", ".join(str(v) for v in vals[i:i + per]) + ",")
     lines.append("};")
