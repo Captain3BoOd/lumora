@@ -4,9 +4,12 @@
 //   python3 tools/audio_analysis_ref.py
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
 #include <cmath>
+#include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include <iterator>
 #include <limits>
 #include <string>
 #include <utility>
