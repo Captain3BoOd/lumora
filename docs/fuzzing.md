@@ -58,3 +58,12 @@ The first directory receives new inputs. Pass the source corpus as a second dire
 Keep each seed small (at most 64 KB) and the whole corpus under 2 MB. Seeds must be hand-made or generated, never
 copied from third-party data. Cover valid inputs, each error path, and limit edges. Do not commit libFuzzer's
 auto-generated corpus.
+
+## Geometry targets (nodetree, outline, stroke)
+
+`fuzz_nodetree`, `fuzz_outline` and `fuzz_stroke` decode raw bytes into structured inputs (a child-list graph, path commands with
+a tolerance, a polyline with a style), including invalid values on purpose. They check the documented invariants on success (a
+consistent forest, bounded contours without consecutive duplicates, counter-clockwise stroke contours) and that an error leaves
+every output untouched. Their seeds under `tools/fuzz/corpus/` run as replay tests under ctest on every compiler. The libFuzzer step
+in CI does not run these three yet; a local run is `fuzz_<name> corpus-dir` with a Clang build and `LUMORA_BUILD_FUZZERS=ON`.
+Evidence label: software only.

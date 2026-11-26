@@ -5,7 +5,7 @@
 #  * With Clang and -DLUMORA_BUILD_FUZZERS=ON each target additionally builds as a libFuzzer binary
 #    (fuzz_<name>) with ASan and UBSan, for real fuzzing runs; those are not part of ctest.
 option(LUMORA_BUILD_FUZZERS "Build libFuzzer binaries (Clang only)" OFF)
-set(LUMORA_FUZZ_TARGETS json manifest scene settings zip inflate ppm png animclip atlas glb)
+set(LUMORA_FUZZ_TARGETS json manifest scene settings zip inflate ppm png animclip atlas glb nodetree outline stroke)
 foreach(t ${LUMORA_FUZZ_TARGETS})
   add_executable(fuzz_${t}_replay fuzz_${t}.cpp replay_main.cpp)
   target_link_libraries(fuzz_${t}_replay PRIVATE lumora_core)
