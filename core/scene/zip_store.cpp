@@ -3,6 +3,8 @@
 #include <cstring>
 
 #include "deflate.h"
+#include "entry_policy.h"
+#include "zip_audit.h"
 
 namespace lumora::scene {
 namespace {
@@ -78,6 +80,28 @@ ZipReadResult read_zip_store(const std::uint8_t* data, std::size_t size, std::ui
   auto fail = [&](const char* m) { res.ok = false; res.error = m; res.files.clear(); return res; };
   Reader R{data, size};
   if (size < 22) return fail("too small for a ZIP archive");
+  // Container audit and entry policy first (core/package). They reject prepended or appended data, extra end
+  // records, header mismatches, overlap and gaps, and unsafe or colliding names before any entry is read. The
+  // checks below stay as a second line of defence. The compression ratio is checked per entry below (with its
+  // small-entry allowance), so the policy ratio is disabled here.
+  {
+    package::ZipAuditLimits audit_limits;
+    audit_limits.max_entries = max_entries;
+    const auto audit = package::audit_zip(data, size, audit_limits);
+    if (audit.verdict != package::ZipVerdict::Ok) {
+      res.audit_verdict = package::to_string(audit.verdict);
+      return fail("archive structure rejected by the container audit");
+    }
+    package::Limits policy;
+    policy.max_entries = max_entries;
+    policy.max_total_uncompressed_bytes = max_total_bytes;
+    policy.max_compression_ratio = ~std::uint64_t{0};
+    const auto set = package::validate_entries(package::to_entry_infos(audit.entries), policy);
+    if (set.verdict != package::SetVerdict::Ok) {
+      res.audit_verdict = package::to_string(set.verdict);
+      return fail("entry set rejected by the entry policy");
+    }
+  }
   // End of central directory: scan back over at most a 65535-byte comment.
   std::size_t eocd = size;
   const std::size_t lo = size > 22 + 65535 ? size - 22 - 65535 : 0;

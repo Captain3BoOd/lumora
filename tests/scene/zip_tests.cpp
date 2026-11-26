@@ -108,3 +108,40 @@ TEST_CASE("deflated entries with short distances survive the zip round trip", "[
     }
   }
 }
+
+TEST_CASE("zip reader applies the container audit and the entry policy", "[zip]") {
+  const auto good = write_zip_store(sample());
+  CHECK(read_zip_store(good.data(), good.size()).ok);
+
+  auto appended = good;
+  appended.push_back(0);
+  const auto ra = read_zip_store(appended.data(), appended.size());
+  CHECK_FALSE(ra.ok);
+  CHECK(ra.audit_verdict == "TrailingData");
+
+  auto prepended = good;
+  prepended.insert(prepended.begin(), 4, 0x41);
+  CHECK_FALSE(read_zip_store(prepended.data(), prepended.size()).ok);
+
+  FileMap trav;
+  trav["../evil.txt"] = {'x'};
+  const auto zt = write_zip_store(trav);
+  const auto rt = read_zip_store(zt.data(), zt.size());
+  CHECK_FALSE(rt.ok);
+  CHECK(rt.audit_verdict == "BadName");
+
+  FileMap reserved;
+  reserved["NUL.txt"] = {'x'};
+  const auto zr = write_zip_store(reserved);
+  CHECK_FALSE(read_zip_store(zr.data(), zr.size()).ok);
+
+  FileMap fold;
+  fold["Readme.txt"] = {'a'};
+  fold["readme.txt"] = {'b'};
+  const auto zf = write_zip_store(fold);
+  const auto rf = read_zip_store(zf.data(), zf.size());
+  CHECK_FALSE(rf.ok);
+  CHECK(rf.audit_verdict == "CaseFoldCollision");
+
+  CHECK_FALSE(read_zip_store(good.data(), good.size(), 2).ok);
+}
