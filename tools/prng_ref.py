@@ -128,6 +128,9 @@ def self_check():
             assert a.state == b.state
 
 
+SEARCH_C5 = (432382947758619778, 18302666269181243910)
+
+
 def cap_cases():
     """Forged generators on a cycle of length 2^j (a fixed point c plus an offset 2^(62-j), increment (1 - mult) * c) whose
     outputs are all below the rejection threshold, so a bounded draw consumes exactly the cap."""
@@ -146,6 +149,24 @@ def cap_cases():
                 outs.append(g.next())
             if g.state == s0 and all(o < t for o in outs):
                 break
+        g = Pcg(s0, inc)
+        res = g.bounded(bound)
+        out.append((s0, inc, bound, res, g.state))
+    # Period 32 (j = 5) is too rare for the deterministic search above (about 2^-32 per candidate). These fixed points c were found
+    # by an offline C++ search over random c (9.3e9 candidates, bound 0x80000001, threshold 0x7FFFFFFF); the asserts below
+    # re-verify the cycle length and that every output on the cycle is below the threshold.
+    for c in SEARCH_C5:
+        bound = 0x80000001
+        t = threshold_of(bound)
+        inc = ((1 - MULT) * c) % M64
+        s0 = (c + 2**57) % M64
+        g = Pcg(s0, inc)
+        outs = [g.next() for _ in range(32)]
+        assert g.state == s0 and all(o < t for o in outs)
+        h = Pcg(s0, inc)
+        for _ in range(16):
+            h.next()
+        assert h.state != s0  # the cycle is exactly 32 long
         g = Pcg(s0, inc)
         res = g.bounded(bound)
         out.append((s0, inc, bound, res, g.state))

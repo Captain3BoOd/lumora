@@ -44,7 +44,7 @@ When an output is accepted the result is the usual rejection-sampling result. Bo
 
 The cap is a bounded-bias fallback. If all 64 outputs are below the threshold, the function stops having consumed exactly 64 outputs and returns the 64th output `% bound`, which can be biased. So the result is unbiased only when the cap is not reached. No probability is claimed for reaching it with a seeded stream and it is not expected in practice. A forged generator can reach it. This keeps the function terminating for every state.
 
-A forged generator with `state 0, inc 0` emits 0 forever and never moves. It reaches the cap for every bound with a positive threshold (3, 5, 6, 0x80000001) and returns 0, and it never reaches the cap for a bound with threshold 0 (2, 4, 0x80000000), which accepts the first output. Both leave the state at 0. Because that state is a fixed point, the consumed count (64 or 1) cannot be seen in the state there, only in the result being 0. The exact consumed count is therefore tested on forged cycle states (see Tests).
+A forged generator with `state 0, inc 0` emits 0 forever and never moves. It reaches the cap for every bound with a positive threshold (3, 5, 6, 0x80000001) and returns 0, and it never reaches the cap for a bound with threshold 0 (2, 4, 0x80000000), which accepts the first output. Both leave the state at 0. Because that state is a fixed point, the consumed count (64 or 1) cannot be seen in the state there, only in the result being 0. The cap cases we know of use forged states. The exact consumed count is tested on forged cycle states (see Tests).
 
 ## advance
 
@@ -62,18 +62,18 @@ A forged generator with `state 0, inc 0` emits 0 forever and never moves. It rea
 
 ## Tests
 
-`tools/prng_ref.py` is an independent reference in Python (unbounded integers, a 2x2 matrix power for the jump). It prints a generated block with the seed, bound and delta lists, FNV-1a 64 digests, and exact cases that the tests recompute. It builds the cap cases from forged states of cycle length 2^j (`inc = (1 - mult) * c`, `state = c + 2^(62 - j)`, j = 1 to 4), whose outputs all stay below the threshold.
+`tools/prng_ref.py` is an independent reference in Python (unbounded integers, a 2x2 matrix power for the jump). It prints a generated block with the seed, bound and delta lists, FNV-1a 64 digests, and exact cases that the tests recompute. It builds the cap cases from forged states of cycle length 2^j (`inc = (1 - mult) * c`, `state = c + 2^(62 - j)`, j = 1 to 4), whose outputs all stay below the threshold, and re-verifies two fixed j = 5 cases found by the search below.
 
 ```
 python3 tools/prng_ref.py                                          # print the block
 python3 tools/prng_ref.py --check tests/prng/prng_tests.cpp
 ```
 
-`tests/prng/prng_tests.cpp` has 16 test cases and 183 assertions. Written cases: defaults, the `seed(42, 54)` vector, seeding details (a hand-built `inc`, the lost top bit, odd `inc` for edge `initseq` values, reseeding a used generator), null handling for every function, `next` from forged states (even `inc` as stored, the old-state rule), bound 0 and bound 1, power-of-two bounds, advance versus repeated `next`, composition and reversal, and the vector after a jump of 3.
+`tests/prng/prng_tests.cpp` has 16 test cases and 189 assertions. Written cases: defaults, the `seed(42, 54)` vector, seeding details (a hand-built `inc`, the lost top bit, odd `inc` for edge `initseq` values, reseeding a used generator), null handling for every function, `next` from forged states (even `inc` as stored, the old-state rule), bound 0 and bound 1, power-of-two bounds, advance versus repeated `next`, composition and reversal, and the vector after a jump of 3.
 
 Exact-state cases, each checking the result and the state after the call (and `inc` unchanged):
 
-- 5 cap cases on cycle states with bounds 0x80000001, 0x80000005 and 0x8000FFFF. After 64 draws the state is back at its start (64 is a multiple of every cycle length), so a cap of 63 or 65 ends in a different state or result;
+- 7 cap cases on forged cycle states with bounds 0x80000001, 0x80000005 and 0x8000FFFF (cycle lengths 2, 4, 8, 16 and, for two cases found by an offline search, 32). After 64 draws the state is back at its start (64 is a multiple of every cycle length), so a cap of 63 or 65 ends in a different state or result;
 - 10 cases on `state 0, inc 0` (positive thresholds reach the cap, thresholds of 0 accept the first output);
 - 18 rejection runs of k rejections followed by an acceptance;
 - 66 cases with an output equal to the threshold minus 1, the threshold, and the threshold plus 1.
@@ -84,22 +84,36 @@ Sweeps use a naive oracle that shares no code with the implementation (a 64-bit 
 - bounded: 4 seeds, 14 bounds, 200 calls, 11,200 calls with the result and exact state after each;
 - advance: 9 seeds, a seeded and a forged-even `inc`, 20 deltas (360 cases), plus 2,000 random cases.
 
+## Search for a long cycle (caps 32, 48, 80, 128)
+
+Question: is there a forged state whose bounded draw separates a cap of 32, 48, 80 or 128 from 64? The cycle length of any state is a power of two. Separating the cap needs a cycle that does not divide the difference from 64: at least 32 for caps 48 and 80, 64 for cap 32 and 128 for cap 128. Every output on the cycle must be below the threshold, so the cap path is taken. The largest threshold any bound can have is 0x7FFFFFFF (bound 0x80000001), so each output is below it with probability a little under 1/2.
+
+Method: states `c + 2^(62 - j)` with `inc = (1 - mult) * c` have an exact cycle of length 2^j (`state - c` is multiplied by `mult` every step). Outputs depend only on state bits 27 to 63, so only those 37 bits of `c` matter. A C++ search over random `c` checked the 2^j outputs of each candidate against 0x7FFFFFFF (bound 0x80000001) and the return to the start state.
+
+Result:
+
+- j = 4 (cycle 16): found easily (285,000,000 candidates, 4,339 hits).
+- j = 5 (cycle 32): 9,332,000,000 candidates, 2 hits (c = 432382947758619778 and c = 18302666269181243910). Both are in the tests. They kill caps 48 and 80.
+- j = 6 and 7 (cycles 64 and 128): not searched. The expected count in this family is about 2^37 * 2^-64, far below 1, so no hit is expected. This is an argument about this family only, not a proof that no such state exists.
+
+Caps 32 and 128 were therefore not killed, and they are not proved equivalent: no state with a long enough cycle and all-rejected outputs was found by this search.
+
 ## Mutation check
 
-93 hand-written source mutants of `prng.cpp` (the multiplier, every shift and operator of the step, the rotation, the old-versus-new state rule, each seeding step and the `(initseq << 1) | 1` term, every null check, the bound 0 and bound 1 rules, the threshold, `>=`, the cap value, the final modulo, and every term, loop limit and the delta handling of `advance`) were compiled against the unchanged tests. 87 were killed by a plain build and 6 survived. Six kills (null checks removed, and a modulo by zero) lost the plain report to a crash (SIGSEGV or SIGFPE) and two (no cap, and a delta that is never shifted off) were killed by the 25 second timeout (the loop does not end).
+93 hand-written source mutants of `prng.cpp` (the multiplier, every shift and operator of the step, the rotation, the old-versus-new state rule, each seeding step and the `(initseq << 1) | 1` term, every null check, the bound 0 and bound 1 rules, the threshold, `>=`, the cap value, the final modulo, and every term, loop limit and the delta handling of `advance`) were compiled against the unchanged tests. 89 were killed by a plain build and 4 survived. Six kills (null checks removed, and a modulo by zero) lost the plain report to a crash (SIGSEGV or SIGFPE) and two (no cap, and a delta that is never shifted off) were killed by the 25 second timeout (the loop does not end).
 
-Rebuilt with `-fsanitize=address,undefined -fno-sanitize-recover=all` (only the mutated file instrumented), 88 are killed and 5 survive; the extra kill is the unmasked rotate, which is undefined behavior only. Run directly under the sanitizers, the crash-only kills report:
+Rebuilt with `-fsanitize=address,undefined -fno-sanitize-recover=all` (only the mutated file instrumented), 90 are killed and 3 survive; the extra kill is the unmasked rotate, which is undefined behavior only. Caps 48 and 80 are killed by the cap test in both builds. Run directly under the sanitizers, the crash-only kills report:
 
 - null checks removed (4): `member access within null pointer` or `reference binding to null pointer`;
 - bound 0 check removed, and modulo by `bound + 1`: `division by zero`;
 - shift 58 for the rotation count, and the rotate `32 - rot`: `shift exponent 61` or `32 is too large for 32-bit type`.
 
-The 5 sanitizer survivors:
+The 3 sanitizer survivors:
 
 - `r` initialised to 1 instead of 0: equivalent. The loop runs at least once, so `r` is always assigned before use.
-- Cap 32, 48, 80 and 128 instead of 64: NOT proven equivalent. They differ from 64 by a multiple of 16, and the longest cycle this test can build is 16 states, so no state the tests can construct tells them apart from 64. Only a cap of 63, 65 or any other value not divisible by 16 away from 64 is killed. I could not construct a state that reaches the cap without a cycle length dividing 16; these four are reported as not reachable by any test I could construct.
+- Cap 32 and cap 128 instead of 64: not killed and not proved equivalent: no state with a long enough cycle and all-rejected outputs was found by the documented search above.
 
-The sixth plain survivor is `(32 - rot)` instead of `((0 - rot) & 31)` in the rotation: for `rot = 0` it is a shift by 32, undefined in C++ but the same result on x86 (shift count is taken modulo 32); the sanitizer run kills it.
+The fourth plain survivor is `(32 - rot)` instead of `((0 - rot) & 31)` in the rotation: for `rot = 0` it is a shift by 32, undefined in C++ but the same result on x86 (shift count is taken modulo 32); the sanitizer run kills it.
 
 ## Not run
 

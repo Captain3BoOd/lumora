@@ -33,7 +33,9 @@ const Case kRefCap[] = {
     {16505759121396833731ull, 14026559636245980540ull, 2147483649u, 1780509304u, 16505759121396833731ull},
     {15979324121840046334ull, 71141393598911064ull, 2147483653u, 1886548995u, 15979324121840046334ull},
     {1306187517919625606ull, 2657036354641740536ull, 2147483649u, 1414612033u, 1306187517919625606ull},
-    {3266349224379569583ull, 12436401778640319724ull, 2147549183u, 302077269u, 3266349224379569583ull}};
+    {3266349224379569583ull, 12436401778640319724ull, 2147549183u, 302077269u, 3266349224379569583ull},
+    {576498135834475650ull, 12530038835249748904ull, 2147483649u, 432u, 576498135834475650ull},
+    {37383547548166ull, 2995912836888489208ull, 2147483649u, 768u, 37383547548166ull}};
 const Case kRefRun[] = {
     {18123512945841774521ull, 15014287968896048084ull, 2147483649u, 1625716773u, 10139136823193581145ull},
     {10515280110826123675ull, 2381218020965965454ull, 2147483649u, 236068189u, 17156682004111070359ull},
@@ -387,7 +389,7 @@ void check_cases(const Case* cases, std::size_t count, std::size_t* bad) {
 }  // namespace
 
 TEST_CASE("bounded cap path on forged cycles reaches exactly 64 outputs", "[prng][bounded][cap]") {
-  // Each forged generator walks a cycle of length 2, 4, 8 or 16 whose outputs are all below the threshold. After 64
+  // Each forged generator walks a cycle of length 2, 4, 8, 16 or 32 whose outputs are all below the threshold. After 64
   // draws the state is back at the start, and any other cap (63, 65, 66, 68, 72, ...) ends at a different state.
   std::size_t bad = 0;
   check_cases(kRefCap, sizeof(kRefCap) / sizeof(kRefCap[0]), &bad);
