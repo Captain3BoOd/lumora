@@ -486,25 +486,26 @@ TEST_CASE("hostile input fails cleanly", "[settings][hostile]") {
   CHECK(err_of("{\"settings_version\":1,\"settings\":" + std::string(5000, '[') + std::string(5000, ']') + "}") ==
         SettingsError::NotJson);
   CHECK(err_of("{\"a\":" + std::string(5000, '{') + "}") == SettingsError::NotJson);
-  // Huge arrays: 200000 settings and a big options array hit TooMany without exhausting anything.
+  // Huge arrays: 200000 items are above the JSON pre-scan item limit (65536), so they are rejected as NotJson
+  // before any parsing.
   {
     std::string s = "{\"settings_version\":1,\"settings\":[";
     for (int i = 0; i < 200000; ++i) s += (i ? ",1" : "1");
     s += "]}";
-    CHECK(err_of(s) == SettingsError::TooMany);
+    CHECK(err_of(s) == SettingsError::NotJson);
   }
   {
     std::string s = R"({"settings_version":1,"settings":[{"id":"e","label":"x","type":"enum","default":"a","options":[)";
     for (int i = 0; i < 200000; ++i) s += (i ? ",1" : "1");
     s += "]}]}";
-    CHECK(err_of(s) == SettingsError::TooMany);
+    CHECK(err_of(s) == SettingsError::NotJson);
   }
-  // A huge colour array is a bad value, a huge migrations list parses.
+  // A huge colour array is above the pre-scan item limit, a huge migrations list parses.
   {
     std::string s = R"({"id":"c","label":"x","type":"color","default":[)";
     for (int i = 0; i < 100000; ++i) s += (i ? ",0" : "0");
     s += "]}";
-    CHECK(err_of(doc(s)) == SettingsError::BadValue);
+    CHECK(err_of(doc(s)) == SettingsError::NotJson);  // above the pre-scan item limit
   }
   // 10 MB of whitespace around a valid document, and 10 MB of whitespace alone.
   {
