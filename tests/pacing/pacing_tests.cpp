@@ -34,7 +34,7 @@ const std::uint32_t kRefValidGrid1[] = {0u, 1u, 2u, 4294967295u};
 const std::uint32_t kRefValidGrid2[] = {0u, 1u, 2u, 4294967295u};
 const std::uint32_t kRefValidGrid3[] = {0u, 99u, 100u, 101u, 1000u, 1001u, 4294967295u};
 const std::uint32_t kRefValidGrid4[] = {0u, 9u, 10u, 11u, 99u, 100u, 101u, 4294967295u};
-const std::uint64_t kRefBudgets[] = {1ull, 2ull, 3ull, 9ull, 10ull, 11ull, 99ull, 100ull, 101ull, 999ull, 1000ull, 1001ull, 16666667ull, 1000000000000000000ull, 18446744073709551ull, 18446744073709552ull, 184467440737095516ull, 184467440737095517ull, 1844674407370955161ull, 1844674407370955162ull, 9223372036854775808ull, 18446744073709551614ull, 18446744073709551615ull};
+const std::uint64_t kRefBudgets[] = {1ull, 2ull, 3ull, 9ull, 10ull, 11ull, 49ull, 50ull, 51ull, 98ull, 99ull, 100ull, 101ull, 999ull, 1000ull, 1001ull, 16666667ull, 1000000000000000000ull, 18446744073709551ull, 18446744073709552ull, 184467440737095516ull, 184467440737095517ull, 1844674407370955161ull, 1844674407370955162ull, 9223372036854775808ull, 18446744073709551614ull, 18446744073709551615ull};
 const std::uint32_t kRefStartNotches[] = {0u, 1u, 2u, 3u, 15u, 16u, 4294967295u};
 const std::uint32_t kRefStartRuns[] = {0u, 1u, 2u, 4294967294u, 4294967295u};
 const std::uint64_t kRefFrameFixed[] = {0ull, 1ull, 18446744073709551614ull, 18446744073709551615ull};
@@ -51,8 +51,8 @@ const std::uint64_t kRefDigest_interval = 0x842FC02FD98687A6ull;
 const std::size_t kRefCases_interval = 8560;
 const std::uint64_t kRefDigest_valid = 0x47997CC3ED8AE5D5ull;
 const std::size_t kRefCases_valid = 6272;
-const std::uint64_t kRefDigest_frames = 0xBCCD433BFE2C6338ull;
-const std::size_t kRefCases_frames = 198975;
+const std::uint64_t kRefDigest_frames = 0xB59880D39858F49Cull;
+const std::size_t kRefCases_frames = 236775;
 const std::uint64_t kRefDigest_thermal = 0x0E3218B1B6B66CAEull;
 const std::size_t kRefCases_thermal = 1050;
 const std::uint64_t kRefDigest_sequences = 0x5B5F8DC4CB18D6EFull;
@@ -519,6 +519,67 @@ TEST_CASE("on_frame threshold boundaries", "[pacing][frame]") {
   CHECK(run_frame(ScaleState{}, 1001, 100, wide).st.notch == 1u);
   CHECK(run_frame(ScaleState{1, 0, 0}, 10, 100, wide).st.notch == 0u);
   CHECK(run_frame(ScaleState{1, 0, 0}, 11, 100, wide).st.notch == 1u);
+}
+
+TEST_CASE("on_frame budgets below 100 ns are valid (quotient zero)", "[pacing][frame]") {
+  // For budget < 100 the quotient budget / 100 is 0 and only the remainder part contributes.
+  struct Row {
+    std::uint64_t budget, over, fast;  // exact thresholds for 110 / 90
+  };
+  const Row rows[] = {{1, 1, 0}, {50, 55, 45}, {99, 108, 89}, {100, 110, 90}};
+  const ScaleConfig c = make_cfg(3, 1, 1, 110, 90);
+  for (const Row& r : rows) {
+    INFO("budget " << r.budget);
+    // Overrun: one above the overrun threshold steps down from notch 0.
+    Step s = run_frame(ScaleState{}, r.over + 1, r.budget, c);
+    CHECK(s.ok);
+    CHECK(s.changed);
+    CHECK(s.st.notch == 1u);
+    // The overrun threshold itself is in between: from notch 1 nothing moves and both runs are 0.
+    s = run_frame(ScaleState{1, 3, 4}, r.over, r.budget, c);
+    CHECK(s.ok);
+    CHECK_FALSE(s.changed);
+    CHECK(s.st.notch == 1u);
+    CHECK(s.st.overrun_run == 0u);
+    CHECK(s.st.fast_run == 0u);
+    // One above the fast threshold is in between too.
+    s = run_frame(ScaleState{1, 3, 4}, r.fast + 1, r.budget, c);
+    CHECK_FALSE(s.changed);
+    CHECK(s.st.notch == 1u);
+    CHECK(s.st.overrun_run == 0u);
+    CHECK(s.st.fast_run == 0u);
+    // The fast threshold itself is fast: from notch 1 it steps back to 0.
+    s = run_frame(ScaleState{1, 3, 4}, r.fast, r.budget, c);
+    CHECK(s.changed);
+    CHECK(s.st.notch == 0u);
+    CHECK(s.st.fast_run == 0u);
+    CHECK(s.st.overrun_run == 0u);
+    // The three classes also drive the runs (limits 2 so nothing moves yet).
+    const ScaleConfig two = make_cfg(3, 2, 2, 110, 90);
+    s = run_frame(ScaleState{1, 0, 0}, r.over + 1, r.budget, two);
+    CHECK(s.st.overrun_run == 1u);
+    CHECK(s.st.notch == 1u);
+    s = run_frame(ScaleState{1, 0, 0}, r.fast, r.budget, two);
+    CHECK(s.st.fast_run == 1u);
+    CHECK(s.st.notch == 1u);
+    // Frame 0 and a huge frame.
+    CHECK(run_frame(ScaleState{1, 0, 0}, 0, r.budget, c).st.notch == 0u);
+    CHECK(run_frame(ScaleState{}, kU64, r.budget, c).st.notch == 1u);
+  }
+  // Wide percents on the same budgets: 1000 / 10 gives 10 * budget and budget / 10 (floor).
+  const ScaleConfig wide = make_cfg(3, 1, 1, 1000, 10);
+  CHECK(run_frame(ScaleState{}, 10, 1, wide).st.notch == 0u);
+  CHECK(run_frame(ScaleState{}, 11, 1, wide).st.notch == 1u);
+  CHECK(run_frame(ScaleState{1, 0, 0}, 0, 1, wide).st.notch == 0u);
+  CHECK(run_frame(ScaleState{1, 0, 0}, 1, 1, wide).st.notch == 1u);
+  CHECK(run_frame(ScaleState{}, 990, 99, wide).st.notch == 0u);
+  CHECK(run_frame(ScaleState{}, 991, 99, wide).st.notch == 1u);
+  CHECK(run_frame(ScaleState{1, 0, 0}, 9, 99, wide).st.notch == 0u);
+  CHECK(run_frame(ScaleState{1, 0, 0}, 10, 99, wide).st.notch == 1u);
+  CHECK(run_frame(ScaleState{}, 500, 50, wide).st.notch == 0u);
+  CHECK(run_frame(ScaleState{}, 501, 50, wide).st.notch == 1u);
+  CHECK(run_frame(ScaleState{1, 0, 0}, 5, 50, wide).st.notch == 0u);
+  CHECK(run_frame(ScaleState{1, 0, 0}, 6, 50, wide).st.notch == 1u);
 }
 
 TEST_CASE("on_frame saturating thresholds", "[pacing][frame]") {
