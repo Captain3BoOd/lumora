@@ -114,3 +114,30 @@ TEST_CASE("scene loader applies the JSON limits before parsing", "[scene][limits
   CHECK(r.message.find("JSON limits") != std::string::npos);
   CHECK(parse_scene(R"({"root":{"id":"a","name":"ok"}})").ok());
 }
+
+namespace {
+FileMap with_sky(const std::string& bytes) {
+  FileMap f = build();
+  put(f, "assets/sky.png", bytes);
+  std::string sums;
+  for (const auto& [p, d] : f) if (p != "checksums.txt") sums += to_hex(sha256(d.data(), d.size())) + "  " + p + "\n";
+  put(f, "checksums.txt", sums);
+  return f;
+}
+}  // namespace
+
+TEST_CASE("the loader applies the load-time budgets", "[loader][budget]") {
+  // A readable small PPM header passes; a PPM above the dimension limit and an 8192 by 8192 PNG header are rejected.
+  CHECK(load_package(with_sky("P6\n100 100\n255\n")).ok());
+  { auto r = load_package(with_sky("P6\n9000 10\n255\n")); CHECK(r.error == LoadError::ResourceBudget); CHECK(r.message.find("TextureDimension") != std::string::npos); }
+  { auto r = load_package(with_sky("P6\n# comment\n99999999999 10\n255\n")); CHECK(r.error == LoadError::ResourceBudget); }
+  {
+    std::string png("\x89PNG\r\n\x1a\n\0\0\0\x0d" "IHDR", 16);
+    png += std::string("\0\0\x20\0\0\0\x20\0", 8);  // 8192 by 8192
+    auto r = load_package(with_sky(png));
+    CHECK(r.error == LoadError::ResourceBudget);
+    CHECK(r.message.find("TextureTooLarge") != std::string::npos);
+  }
+  // An unreadable texture header is left to the decoder.
+  CHECK(load_package(with_sky("not an image")).ok());
+}

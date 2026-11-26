@@ -1,10 +1,13 @@
 #include "scene.h"
 #include "../package/json_limits.h"
 
+#include <algorithm>
+#include <cstdint>
 #include <set>
 
 #include "checksums.h"
 #include "json_value.h"
+#include "load_budget.h"
 
 namespace lumora::scene {
 namespace {
@@ -74,6 +77,51 @@ Node parse_node(const JsonValue& j, unsigned depth, unsigned max_depth, std::set
   }
   return n;
 }
+
+// Budget inputs read straight from the package (no decoding): node count, script size and the pixel size of each
+// texture asset whose PNG or PPM header can be read. A texture with an unreadable header is not budgeted here; the
+// decoder rejects it on its own.
+std::uint64_t count_nodes(const Node& n) {
+  std::uint64_t total = 1;
+  for (const auto& c : n.children) total += count_nodes(c);
+  return total;
+}
+
+bool read_texture_size(const std::vector<std::uint8_t>& d, std::uint32_t& w, std::uint32_t& h) {
+  static const std::uint8_t kPng[8] = {0x89, 'P', 'N', 'G', 0x0D, 0x0A, 0x1A, 0x0A};
+  if (d.size() >= 24 && std::equal(kPng, kPng + 8, d.begin()) && d[12] == 'I' && d[13] == 'H' && d[14] == 'D' && d[15] == 'R') {
+    auto be = [&](std::size_t o) {
+      return (static_cast<std::uint32_t>(d[o]) << 24) | (static_cast<std::uint32_t>(d[o + 1]) << 16) |
+             (static_cast<std::uint32_t>(d[o + 2]) << 8) | static_cast<std::uint32_t>(d[o + 3]);
+    };
+    w = be(16);
+    h = be(20);
+    return true;
+  }
+  if (d.size() >= 2 && d[0] == 'P' && (d[1] == '3' || d[1] == '6')) {
+    std::size_t i = 2;
+    std::uint32_t vals[2] = {0, 0};
+    for (int k = 0; k < 2; ++k) {
+      while (i < d.size() && (d[i] == ' ' || d[i] == '\t' || d[i] == '\n' || d[i] == '\r' || d[i] == '#')) {
+        if (d[i] == '#') while (i < d.size() && d[i] != '\n') ++i;
+        else ++i;
+      }
+      if (i >= d.size() || d[i] < '0' || d[i] > '9') return false;
+      std::uint64_t v = 0;
+      while (i < d.size() && d[i] >= '0' && d[i] <= '9') {
+        v = v * 10 + (d[i] - '0');
+        if (v > 0xFFFFFFFFull) v = 0xFFFFFFFFull;
+        ++i;
+      }
+      vals[k] = static_cast<std::uint32_t>(v);
+    }
+    w = vals[0];
+    h = vals[1];
+    return true;
+  }
+  return false;
+}
+
 }  // namespace
 
 SceneResult parse_scene(std::string_view text, unsigned max_node_depth) {
@@ -162,6 +210,21 @@ LoadResult load_package(const FileMap& files, const EngineSupport& support) {
     if (it == files.end()) return fail(LoadError::MissingFile, "script file is missing: " + r.manifest.script_path);
     if (it->second.size() > kMaxScriptBytes)
       return fail(LoadError::BadManifest, "script file is larger than the allowed size: " + r.manifest.script_path);
+  }
+  // Load-time budgets (core/package/load_budget.h): reject before the scene is handed to anything that allocates.
+  {
+    lumora::package::SceneStats stats;
+    stats.node_count = count_nodes(s.scene.root);
+    if (!r.manifest.script_path.empty()) stats.script_bytes.push_back(files.find(r.manifest.script_path)->second.size());
+    for (const auto& a : s.scene.assets) {
+      if (a.kind != "texture") continue;
+      lumora::package::TextureInfo ti;
+      if (read_texture_size(files.find(a.path)->second, ti.width, ti.height)) stats.textures.push_back(ti);
+    }
+    const auto budget = lumora::package::check_load_budget(stats);
+    if (budget.verdict != lumora::package::BudgetVerdict::Ok)
+      return fail(LoadError::ResourceBudget,
+                  std::string("resource budget exceeded: ") + lumora::package::to_string(budget.verdict));
   }
   r.scene = std::move(s.scene);
   return r;

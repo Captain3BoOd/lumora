@@ -65,7 +65,8 @@ enum class LoadError {
   MissingFile,        // listed or referenced file absent
   SignatureUnsupported,  // reserved signature entry present; this loader cannot verify signatures
   BadManifest,
-  BadScene
+  BadScene,
+  ResourceBudget      // a load-time budget (texture memory, scripts, nodes) is exceeded; see core/package/load_budget.h
 };
 
 struct LoadResult {
