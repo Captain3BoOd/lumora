@@ -26,6 +26,8 @@ Groups:
                  before the reduction (found by a search over lists; the test checks that its own oracle sees the hit).
   hit_pm1        one case at n = 2^20: pm1_list() (seed 300270; 64 coins of value 1 .. 29), whose ways table has the final entry kMod - 1 = 998244352
                  at the amount 33777 (found by a search; the test checks that entry).
+  zero_w         one case: coins {1, 18, 40, 29, 12} at n = 972268, where coins_ways has a reachable positive amount (n itself) whose exact count
+                 148631314946321454 is a multiple of 998244353, so the table entry is 0.
   c64            one case: coins 1 .. 64 at n = 4000 (counts far above the modulus before reduction).
 The LCG is x = x * 6364136223846793005 + 1442695040888963407 (mod 2^64), draw = x >> 32.
 Also printed in the block: how many entries of the exact (unreduced) tables of the case c64 are at least the modulus.
@@ -234,8 +236,23 @@ def pm1_list():
     return [1 + g.next() % maxv for _ in range(64)]
 
 
+ZERO_COINS = [1, 18, 40, 29, 12]
+ZERO_N = 972268
+ZERO_EXACT = 148631314946321454  # the exact number of multisets, divisible by 998244353 (verified in selfcheck with two exact computations)
+
+
+def sweep_ways_exact(coins, n):
+    """The textbook in-place sweep with exact integers (a third formulation, used only to confirm the witness)."""
+    out = [0] * (n + 1)
+    out[0] = 1
+    for c in coins:
+        for v in range(c, n + 1):
+            out[v] += out[v - c]
+    return out
+
+
 def group_names():
-    return ["g4", "g3", "g2", "p64", "rsS", "rsM", "rsF", "big_mix64", "big_pow2", "big_small", "c64", "hit_p", "hit_p1", "hit_pm1"]
+    return ["g4", "g3", "g2", "p64", "rsS", "rsM", "rsF", "big_mix64", "big_pow2", "big_small", "c64", "hit_p", "hit_p1", "hit_pm1", "zero_w"]
 
 
 def build_group(name):
@@ -266,6 +283,8 @@ def build_group(name):
     elif name == "hit_pm1":
         c = pm1_list()
         fold_tables(f, c, BIGN, tables(c, BIGN))
+    elif name == "zero_w":
+        fold_tables(f, ZERO_COINS, ZERO_N, tables(ZERO_COINS, ZERO_N))
     elif name == "big_pow2":
         c = [1 << k for k in range(20)]
         fold_tables(f, c, BIGN, tables(c, BIGN))
@@ -297,6 +316,7 @@ def block(names=None):
         a, b = exceed_counts()
         L.append("constexpr std::size_t kC64WaysAtLeastMod = %d;    // entries of the exact (unreduced) tables of the case c64 that are >= 998244353" % a)
         L.append("constexpr std::size_t kC64SubsetsAtLeastMod = %d;" % b)
+        L.append("constexpr std::uint64_t kZeroExact = %dull;    // exact count of multisets for coins {1, 18, 40, 29, 12} at n = 972268" % ZERO_EXACT)
     L.append(END)
     return "\n".join(L) + "\n"
 
@@ -356,6 +376,11 @@ def selfcheck():
         same(c, g.next() % 31)
     for _, c, n in ROWS:
         same(c, n)
+    # the witness for a table entry of 0: n itself is reachable and its exact count is a multiple of the modulus
+    w1 = fast_ways_exact(ZERO_COINS, ZERO_N)[ZERO_N]
+    w2 = sweep_ways_exact(ZERO_COINS, ZERO_N)[ZERO_N]
+    assert w1 == w2 == ZERO_EXACT and ZERO_EXACT % MOD == 0 and ZERO_EXACT // MOD > 0
+    assert fast_min(ZERO_COINS, ZERO_N)[ZERO_N] != UNR
     # a few closed forms
     assert fast_ways([1] * 5, 9) == [__import__("math").comb(v + 4, 4) % MOD for v in range(10)]
     assert fast_subset([1] * 6, 8) == [__import__("math").comb(6, v) % MOD if v <= 6 else 0 for v in range(9)]

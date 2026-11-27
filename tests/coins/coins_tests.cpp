@@ -12,8 +12,8 @@
 // on every failure the whole buffer must stay unchanged.
 // Extents (labelled): EXHAUSTIVE: every ordered coin list of length 0..5 over {1,2,3,4}, of length 6 over {1,2,3} and of length 7 over {1,2}, each
 // for every n = 0..30 (digests) and with the prefix property of the tables checked; every ordered list of one and two coins over 1..64 at n = 130
-// (digest) and at every n = 0..130 (prefix property and oracle). SAMPLED: 3 x 200 fixed-seed random lists of 3..64 coins with n up to 5000; the
-// listed large cases at n = 2^20; three lists found by a search (a sum of exactly kMod, a sum of kMod - 1, and a final entry kMod - 1). No timing assertion: the step counts are argued in docs/coins.md.
+// (digest) and at every n = 0..130 (each n called on its own: oracle and prefix property). SAMPLED: 3 x 200 fixed-seed random lists of 3..64 coins with n up to 5000; the
+// listed large cases at n = 2^20; four lists found by a search (a sum of exactly kMod, a sum of kMod - 1, a final entry kMod - 1, and a reachable amount with a count of 0 mod kMod). No timing assertion: the step counts are argued in docs/coins.md.
 // What is NOT done: Windows is CI-only; overlapping arrays are not tested (the header leaves them open).
 #include <catch2/catch_test_macros.hpp>
 
@@ -47,9 +47,11 @@ constexpr RefRow kRef[] = {
     {"hit_p", 1, 0xF5574EB32693C6ADull},
     {"hit_p1", 1, 0x0211C131D64EA4CFull},
     {"hit_pm1", 1, 0x72AC418C9D4F02DCull},
+    {"zero_w", 1, 0x3641510C5C845B93ull},
 };
 constexpr std::size_t kC64WaysAtLeastMod = 3886;    // entries of the exact (unreduced) tables of the case c64 that are >= 998244353
 constexpr std::size_t kC64SubsetsAtLeastMod = 1647;
+constexpr std::uint64_t kZeroExact = 148631314946321454ull;    // exact count of multisets for coins {1, 18, 40, 29, 12} at n = 972268
 // END GENERATED REFERENCE
 
 namespace {
@@ -266,18 +268,17 @@ TEST_CASE("exhaustive: every ordered coin list of length 6 over {1,2,3}, every n
 
 TEST_CASE("exhaustive: every ordered coin list of length 7 over {1,2}, every n = 0..30", "[coins]") { exhaustive_all_n("g2", 2, 7, 7); }
 
-TEST_CASE("exhaustive: every ordered list of one and two coins over 1..64, n = 130 and every n = 0..130", "[coins]") {
+TEST_CASE("exhaustive: every ordered list of one and two coins over 1..64, every n = 0..130 against the oracle", "[coins]") {
   Fold f;
   Tally tally;
   each_list(64, 1, 2, [&](const Coins& c) {
     Tables top;
     if (!run_real(c, 130, top, tally, "n=130")) return;
-    const OracleOut o = oracle(c, 130);
-    if (!tables_equal(o.t, top)) tally.fail("oracle differs, m=" + std::to_string(c.size()));
     fold_case(f, c, 130, top);
-    for (std::uint32_t n = 0; n < 130; ++n) {
+    for (std::uint32_t n = 0; n <= 130; ++n) {
       Tables t;
       if (!run_real(c, n, t, tally, "each n")) continue;
+      if (!tables_equal(oracle(c, n).t, t)) tally.fail("oracle differs, n=" + std::to_string(n) + " m=" + std::to_string(c.size()));
       if (!is_prefix(t, top)) tally.fail("not a prefix, n=" + std::to_string(n));
     }
   });
@@ -473,6 +474,24 @@ TEST_CASE("a sum of exactly kMod and of kMod - 1 before the reduction (found by 
     CHECK(f.cases == ref(names[which]).cases);
     CHECK(f.h == ref(names[which]).digest);
   }
+}
+
+TEST_CASE("a reachable positive amount whose count is 0 modulo kMod: coins {1, 18, 40, 29, 12} at n = 972268", "[coins]") {
+  const Coins c = {1u, 18u, 40u, 29u, 12u};
+  const std::uint32_t n = 972268u;
+  Tally tally;
+  Tables t;
+  REQUIRE(run_real(c, n, t, tally, "zero"));
+  // The exact number of multisets (computed in Python with integers of any size, see tools/coins_ref.py) is a positive multiple of kMod.
+  CHECK(kZeroExact % kP == 0u);
+  CHECK(kZeroExact / kP > 0u);
+  CHECK(t.t[0][n] != kUnreachable);  // the amount is reachable
+  CHECK(t.t[1][n] == 0u);            // the table entry is 0 although the count is positive
+  CHECK(t.t[2][n] == 0u);            // (subsets: every coin once reaches only 100, so 0 here is the plain absence of subsets)
+  Fold f;
+  fold_case(f, c, n, t);
+  CHECK(f.cases == ref("zero_w").cases);
+  CHECK(f.h == ref("zero_w").digest);
 }
 
 TEST_CASE("a final table entry equal to kMod - 1: 64 coins at n = 2^20 (found by a search over lists)", "[coins]") {
