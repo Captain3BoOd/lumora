@@ -2,8 +2,8 @@
 //
 // Method. Every value is handled as a sign plus an unsigned magnitude (uint64_t), so INT64_MIN is never negated as a signed number. Products and
 // sums that can reach about 2^127 live in a two-word unsigned helper (Wide: hi and lo, both uint64_t) written with ordinary integer operations
-// only: no compiler 128-bit type, builtin, intrinsic or extension. Every loop has a fixed bound (64 steps for the 32-bit limb multiply, 128
-// shift-subtract steps for a division, 128 steps for a gcd that needs at most 93), so nothing depends on the data for its running time. No
+// only: no compiler 128-bit type, builtin, intrinsic or extension. Every loop has a fixed bound (the 32-bit limb multiply has no loop, a division is exactly 128
+// shift-subtract steps, the gcd is capped at 128 steps and needs at most 91 below 2^63), so nothing depends on the data for its running time. No
 // recursion, no allocation, no global state.
 //
 // Add and subtract use the classic gcd-of-denominators scheme: with g = gcd(db, dd), the sum a/b + c/d has numerator a*(d/g) + c*(b/g) and
@@ -18,7 +18,7 @@ namespace {
 
 constexpr std::uint64_t kMaxPos = 0x7FFFFFFFFFFFFFFFull;   // INT64_MAX
 constexpr std::uint64_t kMinMag = 0x8000000000000000ull;   // |INT64_MIN|
-constexpr int kGcdSteps = 128;                             // Euclid on 64-bit values needs at most 93 steps
+constexpr int kGcdSteps = 128;                             // Euclid on values up to 2^63 needs at most 91 steps
 
 struct Wide {
   std::uint64_t hi;
