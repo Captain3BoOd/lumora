@@ -13,9 +13,9 @@ sequences (brute up to length 12, quad up to 120) and on the block sequences wit
 
 Folds. A fold is a 64-bit FNV-style digest of, for every sequence in order: n, L, the count modulo 2^64, then the L indices of the canonical list.
 "cases" is the number of sequences.
-  ex3    EXHAUSTIVE over values {0, 1, 2}: every sequence of length 0 .. 8 (9841; by length, then the first value changes fastest).
-  ex4    EXHAUSTIVE over values {0, 1, 0x80000000, 0xFFFFFFFF}: every sequence of length 0 .. 6 (5461).
-  perm   EXHAUSTIVE: every permutation of 0 .. n-1 for n = 0 .. 7 (5914; lexicographic order of the permutations of each n).
+  ex3    EXHAUSTIVE over values {0, 1, 2}: every sequence of length 0 .. 10 (88573; by length, then the first value changes fastest).
+  ex4    EXHAUSTIVE over values {0, 1, 0x80000000, 0xFFFFFFFF}: every sequence of length 0 .. 8 (87381).
+  perm   EXHAUSTIVE: every permutation of 0 .. n-1 for n = 0 .. 8 (46234; lexicographic order of the permutations of each n).
   all256 EXHAUSTIVE: the empty sequence, all 256 one-element and all 65536 two-element sequences over 0 .. 255 (65793).
   rs4, rs16, rs32  SAMPLED, fixed seed: 600 random sequences of length 17 .. 400 (length 17 + draw % 384) over the values draw % 4, draw % 16 and
          the full u32 draw (seeds 3004, 3016, 3032).
@@ -281,13 +281,13 @@ def selfcheck():
 
 def build():
     out = {}
-    for name, alpha, mx in (("ex3", [0, 1, 2], 8), ("ex4", V4, 6)):
+    for name, alpha, mx in (("ex3", [0, 1, 2], 10), ("ex4", V4, 8)):
         f = Fold()
         for s in seqs(alpha, mx):
             fold_seq(f, s)
         out[name] = f
     f = Fold()
-    for n in range(8):
+    for n in range(9):
         for p in itertools.permutations(range(n)):
             fold_seq(f, list(p))
     out["perm"] = f

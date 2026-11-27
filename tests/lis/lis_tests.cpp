@@ -4,7 +4,7 @@
 //      a quadratic dynamic programme and a Fenwick-tree method, compared with each other by the script, with exact integers). The tests re-run every
 //      sequence against the real functions and recompute the 64-bit digest (n, L, the count modulo 2^64, the canonical index list) and the number
 //      of sequences.
-//  (2) ORACLE inside the test, sharing no code with core/lis/lis.cpp: every index subset for sequences up to 12 elements, the quadratic dynamic
+//  (2) ORACLE inside the test, sharing no code with core/lis/lis.cpp: every index subset for sequences up to 6 elements, the quadratic dynamic
 //      programme with the canonical list found by plain scans up to 400 elements, and a Fenwick tree over the value ranks (longest length and
 //      number of ways, wrapping modulo 2^64) with patience tails for the starts for the large sequences.
 //  (3) CONSTANTS: the hand rows, the true counts 2^63, 2^64 (residue 0) and 3 * 2^63 (residue 2^63), the closed forms at the limit and the
@@ -66,18 +66,18 @@ const std::uint64_t kRefDigest_big_saw1000_262144 = 0x2FE58CAB4E2269EBULL;
 const std::size_t kRefCases_big_saw1000_262144 = 1;
 const std::uint64_t kRefDigest_big_saw512_262142 = 0x188DC1F8F908A490ULL;
 const std::size_t kRefCases_big_saw512_262142 = 1;
-const std::uint64_t kRefDigest_ex3 = 0xF34796687373D663ULL;
-const std::size_t kRefCases_ex3 = 9841;
-const std::uint64_t kRefDigest_ex4 = 0x51E1CED57F61AEFEULL;
-const std::size_t kRefCases_ex4 = 5461;
+const std::uint64_t kRefDigest_ex3 = 0xC39D3F312E97A360ULL;
+const std::size_t kRefCases_ex3 = 88573;
+const std::uint64_t kRefDigest_ex4 = 0x8E29CF2CC447DC6FULL;
+const std::size_t kRefCases_ex4 = 87381;
 const std::uint64_t kRefDigest_pairs63 = 0x8AC4E09F482B9A04ULL;
 const std::size_t kRefCases_pairs63 = 1;
 const std::uint64_t kRefDigest_pairs64 = 0x33E5A4B36F78EF77ULL;
 const std::size_t kRefCases_pairs64 = 1;
 const std::uint64_t kRefDigest_pairs65 = 0x6539151A57A884ACULL;
 const std::size_t kRefCases_pairs65 = 1;
-const std::uint64_t kRefDigest_perm = 0x81DB1D1832E20D33ULL;
-const std::size_t kRefCases_perm = 5914;
+const std::uint64_t kRefDigest_perm = 0x5384ED3B3A5E09CAULL;
+const std::size_t kRefCases_perm = 46234;
 const std::uint64_t kRefDigest_rs16 = 0xE6E62B4FB4253DB5ULL;
 const std::size_t kRefCases_rs16 = 600;
 const std::uint64_t kRefDigest_rs32 = 0x4A002666FE9493EBULL;
@@ -145,7 +145,7 @@ struct Answer {
   std::vector<std::uint32_t> idx;
 };
 
-// Every index subset (n <= 12): the longest strictly increasing ones, how many and the lexicographically smallest index list.
+// Every index subset (n <= 6): the longest strictly increasing ones, how many and the lexicographically smallest index list.
 Answer oracle_subsets(const Seq& a) {
   const std::size_t n = a.size();
   Answer best;
@@ -281,7 +281,7 @@ Answer oracle_fenwick(const Seq& a) {
 }
 
 Answer oracle(const Seq& a) {
-  if (a.size() <= 12) return oracle_subsets(a);
+  if (a.size() <= 6) return oracle_subsets(a);
   if (a.size() <= 400) return oracle_quad(a);
   return oracle_fenwick(a);
 }
@@ -416,26 +416,26 @@ struct BigCase {
 
 }  // namespace
 
-TEST_CASE("exhaustive: every sequence of length 0..8 over {0, 1, 2}", "[lis]") {
+TEST_CASE("exhaustive: every sequence of length 0..10 over {0, 1, 2}", "[lis]") {
   Tally t;
   std::size_t total = 0;
-  const Fold f = run_exhaustive({0, 1, 2}, 8, t, total);
+  const Fold f = run_exhaustive({0, 1, 2}, 10, t, total);
   expect_digest(f, t, kRefCases_ex3, kRefDigest_ex3);
-  CHECK(total == 9841u);
+  CHECK(total == 88573u);
 }
 
-TEST_CASE("exhaustive: every sequence of length 0..6 over 0, 1, 0x80000000, 0xFFFFFFFF", "[lis]") {
+TEST_CASE("exhaustive: every sequence of length 0..8 over 0, 1, 0x80000000, 0xFFFFFFFF", "[lis]") {
   Tally t;
   std::size_t total = 0;
-  const Fold f = run_exhaustive({0u, 1u, 0x80000000u, 0xFFFFFFFFu}, 6, t, total);
+  const Fold f = run_exhaustive({0u, 1u, 0x80000000u, 0xFFFFFFFFu}, 8, t, total);
   expect_digest(f, t, kRefCases_ex4, kRefDigest_ex4);
-  CHECK(total == 5461u);
+  CHECK(total == 87381u);
 }
 
-TEST_CASE("exhaustive: every permutation of 0..n-1 for n = 0..7", "[lis]") {
+TEST_CASE("exhaustive: every permutation of 0..n-1 for n = 0..8", "[lis]") {
   Tally t;
   Fold f;
-  for (std::uint32_t n = 0; n <= 7; ++n) {
+  for (std::uint32_t n = 0; n <= 8; ++n) {
     Seq p = pat_inc(n);
     do {
       check_seq(p, f, t);
