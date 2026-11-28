@@ -2,9 +2,9 @@
 // unbounded-integer trajectories, the stop-below-n table method for the exhaustive ranges, and an inverse-tree cross-check; see docs/collatz.md), and from two
 // test-only oracles of a different method than the library: (1) the shortcut map T(x) = (3 x + 1) / 2 for odd x with its own step accounting and an overflow test
 // made by a division, and (2) the inverse tree (from 1 upwards through the predecessors 2 m and (m - 1) / 3 for m = 4 mod 6), which assigns steps and peak without
-// iterating forwards. Extents (see docs/collatz.md): the header examples; the check-order matrix; the overflow boundary around 0x5555555555555555; four digest sets
-// (edge window, doubled window, shifted values, 64 bit-length classes of seeded values); every n up to 2^22 against both oracles; every n up to 2^24 against the
-// shortcut oracle and the digest. Result checks are collected in bools and asserted once per case (a loop of millions of values is one assertion).
+// iterating forwards. Extents (see docs/collatz.md): the header examples; the check-order matrix; the overflow boundary around 0x5555555555555555; seven digest sets
+// (edge window, doubled window, shifted values, 64 bit-length classes of seeded values, 200000 seeded uniform u64, 200000 seeded values below 2^40, a sample varied
+// by the odd update at which the call overflows); every n up to 2^24 against both oracles (shortcut oracle and inverse tree) and the digests at 2^22 and 2^24. Result checks are collected in bools and asserted once per case (a loop of millions of values is one assertion).
 #include <catch2/catch_test_macros.hpp>
 
 #include <cstddef>
@@ -31,6 +31,10 @@ constexpr u64 kDigest22 = 0xC434AB6C15BDB22Bull;
 constexpr u64 kDigest24 = 0xC30B1B41BA9799B2ull;
 constexpr u32 kMaxSteps22 = 596u;  // first reached at n = 3732423
 constexpr u32 kMaxSteps24 = 704u;  // first reached at n = 15733191
+constexpr u32 kFoJmax = 102u;
+constexpr u32 kFoCounts[102] = {64u, 64u, 64u, 0u, 64u, 0u, 64u, 64u, 0u, 64u, 0u, 64u, 64u, 0u, 64u, 0u, 64u, 0u, 64u, 64u, 0u, 64u, 0u, 64u, 64u, 0u, 64u, 0u, 64u, 0u, 64u, 64u, 0u, 64u, 0u, 64u, 64u, 0u, 64u, 0u, 64u, 0u, 64u, 53u, 0u, 30u, 0u, 57u, 64u, 0u, 37u, 0u, 27u, 64u, 0u, 2u, 0u, 7u, 0u, 1u, 18u, 0u, 0u, 0u, 2u, 15u, 0u, 1u, 0u, 0u, 0u, 0u, 0u, 0u, 4u, 0u, 0u, 0u, 0u, 0u, 0u, 0u, 0u, 0u, 0u, 0u, 0u, 0u, 0u, 0u, 0u, 0u, 0u, 0u, 0u, 0u, 0u, 0u, 0u, 0u, 0u, 23u};
+constexpr u64 kNodes22 = 1661341u;
+constexpr u64 kNodes24 = 6648354u;
 constexpr u64 kDigestEdge = 0x29BFED85FD885395ull;
 constexpr u64 kCountEdgeOk = 2441u;
 constexpr u64 kCountEdgeOverflow = 5752u;
@@ -51,6 +55,21 @@ constexpr u64 kCountRandomOk = 185930u;
 constexpr u64 kCountRandomOverflow = 6070u;
 constexpr u64 kCountRandomTotal = 192000u;
 constexpr u32 kMaxStepsRandom = 939u;  // first reached at n = 1051610589715613599
+constexpr u64 kDigestUniform = 0x24306FE567AA38B3ull;
+constexpr u64 kCountUniformOk = 79334u;
+constexpr u64 kCountUniformOverflow = 120666u;
+constexpr u64 kCountUniformTotal = 200000u;
+constexpr u32 kMaxStepsUniform = 1085u;  // first reached at n = 2538342448711463201
+constexpr u64 kDigestBelow40 = 0x645E46862FEE9089ull;
+constexpr u64 kCountBelow40Ok = 200000u;
+constexpr u64 kCountBelow40Overflow = 0u;
+constexpr u64 kCountBelow40Total = 200000u;
+constexpr u32 kMaxStepsBelow40 = 892u;  // first reached at n = 451151379025
+constexpr u64 kDigestFirstOverflow = 0x3E6E4B59836E63FFull;
+constexpr u64 kCountFirstOverflowOk = 0u;
+constexpr u64 kCountFirstOverflowOverflow = 2069u;
+constexpr u64 kCountFirstOverflowTotal = 2069u;
+constexpr u32 kMaxStepsFirstOverflow = 0u;  // first reached at n = 0
 // n = T - 68 =6148914691236517137 code=0 steps=559 peak=18446744073709551412
 
 u64 fold(u64 h, u64 w) { return (h ^ w) * 0x100000001b3ull; }
@@ -222,6 +241,50 @@ std::vector<u64> random_set() {
   return v;
 }
 
+std::vector<u64> uniform_set() {
+  std::vector<u64> v;
+  for (u32 i = 0u; i < 200000u; ++i) v.push_back(splitmix_at(2000000u + i));
+  return v;
+}
+std::vector<u64> below40_set() {
+  std::vector<u64> v;
+  for (u32 i = 0u; i < 200000u; ++i) {
+    const u64 x = splitmix_at(3000000u + i) >> 24u;
+    v.push_back(x != 0u ? x : 1u);
+  }
+  return v;
+}
+
+// 1-based index of the odd update at which a call overflows, 0 when it is Ok; made with the shortcut map (each odd x is one shortcut update)
+u32 oracle_first_overflow(u64 n) {
+  const u64 lim = (kMax64 - 1u) / 3u;
+  u64 x = n;
+  u32 odd = 0u;
+  while (x != 1u) {
+    if (x % 2u == 0u) {
+      x /= 2u;
+    } else {
+      ++odd;
+      if (x > lim) return odd;
+      x = x + x / 2u + 1u;
+    }
+  }
+  return 0u;
+}
+// scan T - 2^18 .. T + 2^18 upwards and keep the first 64 starts for each overflowing odd-update index; counts[j] for j below 256
+std::vector<u64> first_overflow_set(u32* counts) {
+  std::vector<u64> v;
+  for (u32 j = 0u; j < 256u; ++j) counts[j] = 0u;
+  for (u64 n = kT - (1ull << 18u); n <= kT + (1ull << 18u); ++n) {
+    const u32 j = oracle_first_overflow(n);
+    if (j > 0u && j < 256u && counts[j] < 64u) {
+      ++counts[j];
+      v.push_back(n);
+    }
+  }
+  return v;
+}
+
 struct Ex {
   u64 n;
   u64 steps;
@@ -344,10 +407,37 @@ TEST_CASE("collatz digest set: seeded bit-length classes", "[collatz]") {
   CHECK(ok);
 }
 
-TEST_CASE("collatz every n up to 2^22 against both oracles and the digest", "[collatz]") {
-  // oracle 2: the inverse tree of every value up to 2^22 whose whole trajectory stays at or below 2^22
-  std::vector<std::uint16_t> depth(kNmax + 1u, 0u);  // steps + 1, 0 = not in the tree
-  std::vector<u32> tpk(kNmax + 1u, 0u);
+TEST_CASE("collatz digest set: 200000 seeded uniform u64", "[collatz]") {
+  const SetStat s = run_set(uniform_set());
+  const bool ok = s.all_ok && s.digest == kDigestUniform && s.ok == kCountUniformOk && s.overflow == kCountUniformOverflow && s.total == kCountUniformTotal &&
+                  s.max_steps == kMaxStepsUniform;
+  CHECK(ok);
+}
+TEST_CASE("collatz digest set: 200000 seeded values below 2^40", "[collatz]") {
+  const SetStat s = run_set(below40_set());
+  const bool ok = s.all_ok && s.digest == kDigestBelow40 && s.ok == kCountBelow40Ok && s.overflow == kCountBelow40Overflow && s.total == kCountBelow40Total &&
+                  s.max_steps == kMaxStepsBelow40;
+  CHECK(ok);
+}
+TEST_CASE("collatz digest set: varied first-overflow step", "[collatz]") {
+  u32 counts[256];
+  const std::vector<u64> v = first_overflow_set(counts);
+  bool cnt_ok = true;
+  for (u32 j = 1u; j < 256u; ++j) {
+    const u32 want = (j <= kFoJmax) ? kFoCounts[j - 1u] : 0u;
+    if (counts[j] != want) cnt_ok = false;
+  }
+  CHECK(cnt_ok);
+  const SetStat s = run_set(v);
+  const bool ok = s.all_ok && s.digest == kDigestFirstOverflow && s.ok == kCountFirstOverflowOk && s.overflow == kCountFirstOverflowOverflow &&
+                  s.total == kCountFirstOverflowTotal;
+  CHECK(ok);
+}
+
+TEST_CASE("collatz every n up to 2^24 against both oracles and the digests", "[collatz]") {
+  // oracle 2: the inverse tree of every value up to 2^24 whose whole trajectory stays at or below 2^24
+  std::vector<std::uint16_t> depth(kNbig + 1u, 0u);  // steps + 1, 0 = not in the tree
+  std::vector<u32> tpk(kNbig + 1u, 0u);
   std::vector<u32> stack;
   depth[1] = 1u;
   tpk[1] = 1u;
@@ -356,7 +446,7 @@ TEST_CASE("collatz every n up to 2^22 against both oracles and the digest", "[co
     const u32 m = stack.back();
     stack.pop_back();
     const u64 c1 = 2ull * m;
-    if (c1 <= kNmax && depth[c1] == 0u) {
+    if (c1 <= kNbig && depth[c1] == 0u) {
       depth[c1] = static_cast<std::uint16_t>(depth[m] + 1u);
       tpk[c1] = (c1 > tpk[m]) ? static_cast<u32>(c1) : tpk[m];
       stack.push_back(static_cast<u32>(c1));
@@ -375,9 +465,12 @@ TEST_CASE("collatz every n up to 2^22 against both oracles and the digest", "[co
   bool tree = true;
   bool inv = true;
   u64 h = kFnv0;
+  u64 h22 = 0u;
   u32 max_steps = 0u;
+  u32 max_steps22 = 0u;
   u64 in_tree = 0u;
-  for (u64 n = 1u; n <= kNmax; ++n) {
+  u64 in_tree22 = 0u;
+  for (u64 n = 1u; n <= kNbig; ++n) {
     const Rec r = call(n);
     if (!r.guard_ok) guard = false;
     if (r.code != 0u) {
@@ -387,43 +480,25 @@ TEST_CASE("collatz every n up to 2^22 against both oracles and the digest", "[co
     if (!same(r, oracle_shortcut(n))) sc = false;
     if (!invariants(n, r)) inv = false;
     const bool member = depth[n] != 0u;
-    if (member != (r.peak <= kNmax)) tree = false;
+    if (member != (r.peak <= kNbig)) tree = false;
     if (member) {
       ++in_tree;
+      if (r.peak <= kNmax) ++in_tree22;
       if (static_cast<u64>(depth[n] - 1u) != r.steps || static_cast<u64>(tpk[n]) != r.peak) tree = false;
     }
     h = fold(fold(fold(fold(h, n), 0u), r.steps), r.peak);
     if (r.steps > max_steps) max_steps = static_cast<u32>(r.steps);
+    if (n == kNmax) {
+      h22 = h;
+      max_steps22 = max_steps;
+    }
   }
   CHECK(guard);
   CHECK(sc);
   CHECK(tree);
   CHECK(inv);
-  const bool dig = (h == kDigest22) && (max_steps == kMaxSteps22);
+  const bool dig = (h22 == kDigest22) && (max_steps22 == kMaxSteps22) && (h == kDigest24) && (max_steps == kMaxSteps24);
   CHECK(dig);
-  CHECK(in_tree > 1000000u);
-}
-
-TEST_CASE("collatz every n up to 2^24 against the shortcut oracle and the digest", "[collatz]") {
-  bool guard = true;
-  bool sc = true;
-  bool inv = true;
-  u64 h = kFnv0;
-  u32 max_steps = 0u;
-  for (u64 n = 1u; n <= kNbig; ++n) {
-    const Rec r = call(n);
-    if (!r.guard_ok || r.code != 0u) {
-      guard = false;
-      continue;
-    }
-    if (!same(r, oracle_shortcut(n))) sc = false;
-    if (!invariants(n, r)) inv = false;
-    h = fold(fold(fold(fold(h, n), 0u), r.steps), r.peak);
-    if (r.steps > max_steps) max_steps = static_cast<u32>(r.steps);
-  }
-  CHECK(guard);
-  CHECK(sc);
-  CHECK(inv);
-  const bool dig = (h == kDigest24) && (max_steps == kMaxSteps24);
-  CHECK(dig);
+  const bool nodes = (in_tree == kNodes24) && (in_tree22 == kNodes22);
+  CHECK(nodes);
 }

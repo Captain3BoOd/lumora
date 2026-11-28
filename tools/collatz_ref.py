@@ -93,6 +93,7 @@ def table_walk(top):
             mx[22] = best
     mx[24] = best
     table_walk.max_steps = mx
+    table_walk.pk = pk
     return st, pk, h22, h
 
 
@@ -147,6 +148,44 @@ def random_set():
     return out
 
 
+def uniform_set():
+    return [splitmix_at(2000000 + i) for i in range(200000)]
+
+
+def below40_set():
+    out = []
+    for i in range(200000):
+        v = splitmix_at(3000000 + i) >> 24
+        out.append(v if v != 0 else 1)
+    return out
+
+
+def first_overflow_index(n):
+    """1-based index of the odd update at which the call overflows, 0 when the call is Ok."""
+    x, odd = n, 0
+    while x != 1:
+        if x % 2 == 0:
+            x //= 2
+        else:
+            odd += 1
+            if 3 * x + 1 > M64:
+                return odd
+            x = 3 * x + 1
+    return 0
+
+
+def first_overflow_set():
+    """Scan T - 2^18 .. T + 2^18 upwards; keep the first 64 starts for each overflowing odd-update index j (1, 2, 3, ...). Returns the list and the per-j counts."""
+    cnt = {}
+    out = []
+    for n in range(T - (1 << 18), T + (1 << 18) + 1):
+        j = first_overflow_index(n)
+        if j > 0 and cnt.get(j, 0) < 64:
+            cnt[j] = cnt.get(j, 0) + 1
+            out.append(n)
+    return out, cnt
+
+
 def digest_set(lst):
     h = FNV0
     ok = ov = 0
@@ -173,6 +212,8 @@ def cmd_check():
     for i in range(20000):
         n = 1 + splitmix_at(i) % NMAX
         assert traj(n) == (OK, st[n], pk[n]), n
+    depth22, _ = inverse_tree(NMAX)
+    assert len(depth22) == sum(1 for n in range(1, NMAX + 1) if table_walk.pk[n] <= NMAX)
     depth, peak = inverse_tree(1 << 20)
     cnt = 0
     for n in range(1, (1 << 20) + 1):
@@ -221,7 +262,16 @@ def cmd_emit():
     print("constexpr u64 kDigest24 = 0x%016Xull;" % h24)
     print("constexpr u32 kMaxSteps22 = %du;  // first reached at n = %d" % table_walk.max_steps[22])
     print("constexpr u32 kMaxSteps24 = %du;  // first reached at n = %d" % table_walk.max_steps[24])
-    for name, lst in (("Edge", edge_set()), ("Halving", halving_set()), ("Shifted", shifted_set()), ("Random", random_set())):
+    fo, cnt = first_overflow_set()
+    jmax = max(cnt)
+    print("constexpr u32 kFoJmax = %du;" % jmax)
+    print("constexpr u32 kFoCounts[%d] = {%s};" % (jmax, ", ".join("%du" % cnt.get(j, 0) for j in range(1, jmax + 1))))
+    nodes = {}
+    for B in (NMAX, NBIG):
+        nodes[B] = sum(1 for n in range(1, B + 1) if table_walk.pk[n] <= B)
+    print("constexpr u64 kNodes22 = %du;" % nodes[NMAX])
+    print("constexpr u64 kNodes24 = %du;" % nodes[NBIG])
+    for name, lst in (("Edge", edge_set()), ("Halving", halving_set()), ("Shifted", shifted_set()), ("Random", random_set()), ("Uniform", uniform_set()), ("Below40", below40_set()), ("FirstOverflow", fo)):
         h, ok, ov, n = digest_set(lst)
         print("constexpr u64 kDigest%s = 0x%016Xull;" % (name, h))
         print("constexpr u64 kCount%sOk = %du;" % (name, ok))
